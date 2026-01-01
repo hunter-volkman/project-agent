@@ -1,0 +1,11 @@
+{
+  "name": "project-agent",
+  "version": "1.0.0",
+  "description": "Project intelligence across Jira and GitHub",
+  "main": "src/index.js",
+  "private": true,
+  "license": "MIT",
+  "dependencies": {
+    "@forge/api": "^4.0.0"
+  }
+}

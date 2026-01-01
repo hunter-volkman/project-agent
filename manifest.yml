@@ -1,0 +1,165 @@
+# Project Agent
+
+modules:
+  rovo:agent:
+    - key: project-agent
+      name: Project Agent
+      description: Connect work to code for projects
+      prompt: |
+        SYSTEM
+        Connect Jira work items to GitHub code state.
+        Determine readiness. Surface blockers. Enable decisions.
+
+        TOOLS
+        get-issue     {issue}        → {key, summary, status, assignee, prs[]}
+        get-sprint    {project}      → {name, goal, daysRemaining, issues[]}
+        get-pr-status {repo, number} → {author, draft, mergeable, mergeConflicts, reviews{approved[], changesRequested[]}, checks{passed, failed, pending, failedNames[]}}
+        search-prs    {query}        → [{number, title, author, repo, state}]
+
+        ROUTING
+        issue key in query     → get-issue first
+        sprint/project query   → get-sprint first
+        person/PR query        → search-prs first
+
+        EXECUTION
+        For issue readiness:
+          1. get-issue(key)
+          2. if prs[] empty → return NOT_STARTED
+          3. for each pr: get-pr-status(pr.repo, pr.number)
+          4. evaluate STATUS
+          5. return verdict + blockers + next action
+
+        For sprint health:
+          1. get-sprint(project)
+          2. for each issue where status ≠ Done: evaluate readiness
+          3. aggregate by STATUS
+          4. return summary, blockers first
+
+        STATUS EVALUATION
+        Order matters. First match returns.
+          prs[] empty              → NOT_STARTED
+          mergeConflicts           → BLOCKED
+          checks.failed > 0        → BLOCKED
+          changesRequested.length  → BLOCKED
+          draft                    → IN_PROGRESS
+          checks.pending > 0       → IN_PROGRESS
+          default                  → READY
+
+        OUTPUT
+        Single:
+          STATUS: {STATUS}
+          {key} "{summary}"
+          PR #{number} by @{author}
+          Blockers: {type}: {detail}
+          Next: {action}
+
+        Aggregate:
+          {n} items: {blocked} blocked, {ready} ready, {in_progress} in progress
+          Blockers:
+            {key}: {reason}
+          Next: {action}
+
+        FORMAT RULES
+        @{username} for people
+        #{number} for PRs
+        {check_name} for CI (from failedNames[])
+        Blockers ordered: conflicts → CI → reviews
+
+      conversationStarters:
+        - Is the ticket ready to ship?
+        - What's blocking the sprint?
+        - Show me open PRs
+        - Who needs to review what?
+      actions:
+        - get-issue
+        - get-sprint
+        - get-pr-status
+        - search-prs
+
+  action:
+    - key: get-issue
+      name: Get Issue
+      function: getIssue
+      actionVerb: GET
+      description: Jira issue with linked PRs
+      inputs:
+        issue:
+          title: Issue Key
+          type: string
+          required: true
+          description: Jira issue key
+
+    - key: get-sprint
+      name: Get Sprint
+      function: getSprint
+      actionVerb: GET
+      description: Active sprint with issues
+      inputs:
+        project:
+          title: Project Key
+          type: string
+          required: true
+          description: Jira project key
+
+    - key: get-pr-status
+      name: Get PR Status
+      function: getPRStatus
+      actionVerb: GET
+      description: PR with reviews and checks
+      inputs:
+        repo:
+          title: Repository
+          type: string
+          required: true
+          description: GitHub repository
+        number:
+          title: PR Number
+          type: number
+          required: true
+          description: Pull request number
+
+    - key: search-prs
+      name: Search PRs
+      function: searchPRs
+      actionVerb: GET
+      description: Search PRs
+      inputs:
+        query:
+          title: Query
+          type: string
+          required: true
+          description: GitHub search query
+
+  function:
+    - key: getIssue
+      handler: index.getIssue
+    - key: getSprint
+      handler: index.getSprint
+    - key: getPRStatus
+      handler: index.getPRStatus
+    - key: searchPRs
+      handler: index.searchPRs
+
+permissions:
+  scopes:
+    - read:jira-work
+    - read:jira-user
+    - storage:app
+    - read:board-scope:jira-software
+    - read:project:jira
+    - read:sprint:jira-software
+    - read:issue-details:jira
+    - read:jql:jira
+  external:
+    fetch:
+      client:
+        - address: api.github.com
+      backend:
+        - address: api.github.com
+
+app:
+  runtime:
+    name: nodejs24.x
+    memoryMB: 256
+    architecture: arm64
+  id: ari:cloud:ecosystem::app/89203961-0700-47fe-9703-dbca5b769418
